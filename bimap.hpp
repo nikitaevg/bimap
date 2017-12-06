@@ -7,15 +7,39 @@
 namespace bimaps
 {
 
-    class Right;
     class Left;
+    class Right;
+
+    template <typename Key, typename T>
+    using map_adapter = std::map<Key, T, std::less<Key>, std::allocator<std::pair<const Key, T>>>;
+
+    template <typename Key, typename T>
+    using umap_adapter = std::unordered_map<Key, T, std::hash<Key>, std::equal_to<Key>,
+            std::allocator<std::pair<const Key, T>>>;
 
     template <typename Side>
-    using reverse_t = std::conditional_t<std::is_same_v<Side, Left>, Right, Left>;
+    class is_left;
+
+    template <>
+    class is_left<Left>
+    {
+    public:
+        static constexpr bool value = true;
+    };
+
+    template <>
+    class is_left<Right>
+    {
+    public:
+        static constexpr bool value = false;
+    };
+
+    template <typename Side>
+    using reverse_t = std::conditional_t<is_left<Side>::value, Right, Left>;
 
     template<typename A, typename B,
-            template<typename, typename> typename C1 = std::map,
-            template<typename, typename> typename C2 = C1>
+            template <typename, typename> class C1 = map_adapter,
+            template <typename, typename> class C2 = C1>
     class bimap
     {
         using left_container_t       = C1<A, const B *>;
@@ -36,30 +60,36 @@ namespace bimaps
         right_container_t right_map;
 
         template<typename Side>
-        using map_type_by_side_t = std::conditional_t<std::is_same_v<Side, Left>,
+        using map_type_by_side_t = std::conditional_t<is_left<Side>::value,
                 left_container_t, right_container_t>;
 
         template<typename Side>
-        using iter_by_side_t = std::conditional_t<std::is_same_v<Side, Left>,
+        using iter_by_side_t = std::conditional_t<is_left<Side>::value,
                 const_left_iterator_t, const_right_iterator_t>;
 
         template <typename Side>
-        using curr_key_t = std::conditional_t<std::is_same_v<Side, Left>, A, B>;
+        using curr_key_t = std::conditional_t<is_left<Side>::value, A, B>;
 
         template <typename Side>
         using curr_value_t = curr_key_t<reverse_t<Side>>;
+
+        const map_type_by_side_t<Left> &
+        map_by_side(const detail::side_identity<Left> &) const
+        {
+            return left_map;
+        }
+
+        const map_type_by_side_t<Right> &
+        map_by_side(const detail::side_identity<Right> &) const
+        {
+            return right_map;
+        }
 
         template<typename Side>
         const map_type_by_side_t<Side> &
         map_by_side() const
         {
-            if constexpr (std::is_same_v<Side, Left>)
-            {
-                return left_map;
-            } else
-            {
-                return right_map;
-            }
+            return map_by_side(detail::side_identity<Side>());
         }
 
         template<typename Side>
@@ -76,18 +106,37 @@ namespace bimaps
             return right_map.erase(b);
         };
 
+        size_t erase_impl(const curr_key_t<Left> &a, const curr_value_t<Left> &b, const detail::side_identity<Left> &)
+        {
+            left_map.erase(a);
+            return right_map.erase(b);
+        }
+
+        size_t erase_impl(const curr_key_t<Right> &a, const curr_value_t<Right> &b, const detail::side_identity<Right> &)
+        {
+            return erase_impl<Left>(b, a);
+        }
+
+        template <typename Side>
+        size_t erase_impl(const curr_key_t<Side> &a, const curr_value_t<Side> &b)
+        {
+            return erase_impl(a, b, detail::side_identity<Side>());
+        }
+
+
     public:
 
         template<typename Side>
         class iterator
         {
-            static constexpr bool is_left = std::is_same_v<Side, Left>;
-            using old_iterator_t = std::conditional_t<is_left,
+            static constexpr bool is_left_v = is_left<Side>::value;
+            using old_iterator_t = std::conditional_t<is_left_v,
                     typename left_container_t::const_iterator,
                     typename right_container_t::const_iterator>;
-            using value_t = std::conditional_t<is_left, std::pair<const A &, const B &>,
+            using value_t = std::conditional_t<is_left_v, std::pair<const A &, const B &>,
                     std::pair<const B &, const A &>>;
             old_iterator_t iterator_impl;
+
         public:
 
             iterator() = default;
@@ -105,7 +154,7 @@ namespace bimaps
                 return iterator_impl;
             }
 
-            const value_t &operator*() const
+            const value_t operator*() const
             {
                 auto &ret = *iterator_impl;
                 return {ret.first, *ret.second};
@@ -130,17 +179,17 @@ namespace bimaps
                 return old;
             }
 
+            iterator &operator--()
+            {
+                iterator_impl--;
+                return *this;
+            }
+
             iterator operator--(int)
             {
                 iterator old = *this;
                 --*this;
                 return old;
-            }
-
-            iterator &operator--()
-            {
-                iterator_impl--;
-                return *this;
             }
 
             friend bool operator==(iterator a, iterator b)
@@ -167,8 +216,8 @@ namespace bimaps
             detail::call_ctor(right_map, args2, s2);
             if (left_map.size() || right_map.size())
             {
-                ~bimap();
-                throw std::logic_error();
+                this->~bimap();
+                throw std::logic_error("Attempt to create bimap with non-empty maps");
             }
         };
 
@@ -191,7 +240,7 @@ namespace bimaps
             }
             catch (...)
             {
-                ~bimap();
+                this->~bimap();
                 throw;
             }
         }
@@ -202,20 +251,19 @@ namespace bimaps
         std::pair<const_left_iterator_t, const_right_iterator_t>
         insert(LeftType &&left, RightType &&right)
         {
-            if (auto l_iter = left_map.find(left); l_iter != left_map.end())
-            {
-                auto r_iter = right_map.find(right);
-                return std::pair{iterator<Left>(l_iter), iterator<Right>(r_iter)};
-            }
-            auto[l_iter, unused] = left_map.insert({std::forward<LeftType>(left), nullptr});
+            using R = std::pair<const_left_iterator_t, const_right_iterator_t>;
+            auto l_find = left_map.find(left);
+            auto r_find = right_map.find(right);
+            if (l_find != left_map.end() || r_find != right_map.end())
+                return R(l_find, r_find);
+            auto l_iter = left_map.insert({std::forward<LeftType>(left), nullptr}).first;
             try
             {
-                auto[r_iter, unused] = right_map.insert({std::forward<RightType>(right), nullptr});
+                auto r_iter = right_map.insert({std::forward<RightType>(right), &l_iter->first}).first;
                 try
                 {
                     left_map[l_iter->first] = &r_iter->first;
-                    right_map[r_iter->first] = &l_iter->first;
-                    return std::pair{iterator<Left>(l_iter), iterator<Right>(r_iter)};
+                    return R(l_iter, r_iter);
                 }
                 catch (...)
                 {
@@ -237,14 +285,7 @@ namespace bimaps
             if (map.find(key) == map.end())
                 return 0;
             auto *second_key = map[key];
-            if constexpr (std::is_same_v<Side, Left>)
-            {
-                return erase_impl(key, *second_key);
-            }
-            else
-            {
-                return erase_impl(*second_key, key);
-            }
+            return erase_impl<Side>(key, *second_key);
         }
 
         template<typename Side>
@@ -305,5 +346,4 @@ namespace bimaps
         }
 
     };
-
 }

@@ -38,8 +38,15 @@ namespace
     class random_generator<std::string> : random
     {
         std::uniform_int_distribution<size_t> int_dist;
-        static constexpr size_t string_size = 10;
+        size_t string_size = 10;
     public:
+
+        random_generator() = default;
+
+        random_generator(size_t size) : string_size (size)
+        {
+        }
+
         std::string operator()()
         {
             std::string s;
@@ -65,8 +72,8 @@ namespace
     random_generator<int32_t> i_gen;
 
     template<typename Side, typename A, typename B,
-            template<typename, typename> typename Map1,
-            template<typename, typename> typename Map2,
+            template<typename, typename> class Map1,
+            template<typename, typename> class Map2,
             typename Map>
     void test_maps_equality(bimap<A, B, Map1, Map2> &bm, Map &map)
     {
@@ -74,12 +81,14 @@ namespace
         {
             ASSERT_EQ(bm.template at<Side>(iter.first), iter.second);
             ASSERT_FALSE(bm.template find<Side>(iter.first) == bm.template end<Side>());
+            auto found = *bm.template find<Side>(iter.first);
+            ASSERT_EQ(found.second, iter.second);
         }
     }
 
     template<typename A, typename B,
-            template<typename, typename> typename Map1,
-            template<typename, typename> typename Map2>
+            template<typename, typename> class Map1,
+            template<typename, typename> class Map2>
     void test_insert(bimap<A, B, Map1, Map2> &bm, random_generator<A> &generator_a,
                      random_generator<B> &generator_b, size_t iters)
     {
@@ -89,15 +98,24 @@ namespace
         {
             A first = generator_a();
             B second = generator_b();
-            bool inserted1 = map1.insert({first, second}).second;
-            bool inserted2 = map2.insert({second, first}).second;
-            if (inserted1 && inserted2)
-            {
-                // Not to find not existing objects
+            auto l_found = map1.find(first);
+            auto r_found = map2.find(second);
+            bool l_was = l_found != map1.end(), r_was = r_found != map2.end();
+            // Not to find elements, that are not found in usual maps
+            if (!l_was)
                 ASSERT_EQ(bm.template find<Left>(first), bm.template end<Left>());
+            if (!r_was)
                 ASSERT_EQ(bm.template find<Right>(second), bm.template end<Right>());
-                bm.insert(first, second);
-            }
+            auto iter = bm.insert(first, second);
+            // Check for correct return value of insert
+            if (l_was)
+                ASSERT_EQ(iter.first, bm.template find<Left>(first));
+            if (r_was)
+                ASSERT_EQ(iter.second, bm.template find<Right>(second));
+            if (l_found != map1.end() || r_found != map2.end())
+                continue;
+            map1.insert({first, second});
+            map2.insert({second, first});
         }
 
         test_maps_equality<Left>(bm, map1);
@@ -115,8 +133,8 @@ namespace
     }
 
     template<typename Side, typename A, typename B,
-            template<typename, typename> typename Map1,
-            template<typename, typename> typename Map2>
+            template<typename, typename> class Map1,
+            template<typename, typename> class Map2>
     void erase_elements(bimap<A, B, Map1, Map2> &bm,
                         typename bimap<A, B, Map1, Map2>::template iterator<Side> iter, size_t iters)
     {
@@ -129,7 +147,7 @@ namespace
             else
             {
                 iter++;
-                bm.template erase<Side>(a);
+                ASSERT_EQ(bm.template erase<Side>(a), 1);
             }
             ASSERT_EQ(bm.template find<Side>(a), bm.template end<Side>());
             ASSERT_EQ(bm.template find<reverse_t<Side>>(b), bm.template end<reverse_t<Side>>());
@@ -137,8 +155,8 @@ namespace
     }
 
     template<typename A, typename B,
-            template<typename, typename> typename Map1,
-            template<typename, typename> typename Map2>
+            template<typename, typename> class Map1,
+            template<typename, typename> class Map2>
     void test_erase(bimap<A, B, Map1, Map2> &bm, random_generator<A> &generator_a,
                     random_generator<B> &generator_b, size_t iters)
     {
@@ -146,8 +164,7 @@ namespace
             bm.insert(generator_a(), generator_b());
 
         size_t size = bm.size();
-        erase_elements<Left>(bm, bm.template begin<Left>(), size / 2);
-        size /= 2;
+        erase_elements<Left>(bm, bm.template begin<Left>(), size /= 2);
         erase_elements<Right>(bm, bm.template begin<Right>(), size);
         ASSERT_EQ(bm.size(), 0);
     }
@@ -190,9 +207,16 @@ TEST(simple_map, erase)
     test_erase(bm, i_gen, s_gen, ITERATIONS);
 }
 
+TEST(simple_map, inserting_same_keys_and_values)
+{
+    bimap<std::string, std::string> bm;
+    random_generator<std::string> sgen(1); // one char generator
+    test_insert(bm, sgen, sgen, ITERATIONS);
+}
+
 TEST(hash_map, insert_and_erase)
 {
-    bimap<std::string, std::string, std::unordered_map> bm;
+    bimap<std::string, std::string, umap_adapter> bm;
     test_insert(bm, s_gen, s_gen, ITERATIONS);
     bm.clear();
     ASSERT_TRUE(bm.empty());

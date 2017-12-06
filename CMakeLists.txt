@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 project(bimap)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -Werror -D__STRICT_ANSI__")
+
+set(CMAKE_CXX_STANDARD 14)
 
 #GTest
 find_package(GTest REQUIRED)
