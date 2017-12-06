@@ -154,7 +154,7 @@ namespace bimaps
                 return iterator_impl;
             }
 
-            const value_t operator*() const
+            value_t operator*() const
             {
                 auto &ret = *iterator_impl;
                 return {ret.first, *ret.second};
