@@ -100,12 +100,6 @@ namespace bimaps
             return const_cast<map_type_by_side_t<Side> &>(x);
         }
 
-        size_t erase_impl(const A &a, const B &b)
-        {
-            left_map.erase(a);
-            return right_map.erase(b);
-        };
-
         size_t erase_impl(const curr_key_t<Left> &a, const curr_value_t<Left> &b, const detail::side_identity<Left> &)
         {
             left_map.erase(a);
@@ -216,14 +210,13 @@ namespace bimaps
             detail::call_ctor(right_map, args2, s2);
             if (left_map.size() || right_map.size())
             {
-                this->~bimap();
                 throw std::logic_error("Attempt to create bimap with non-empty maps");
             }
         };
 
-        bimap(const bimap &map) = default;
+        bimap(const bimap &map) = delete;
 
-        bimap(bimap &&other) = default;
+        bimap(bimap &&other) = delete;
 
         bimap &operator=(const bimap &) = default;
 
@@ -231,17 +224,9 @@ namespace bimaps
 
         bimap(std::initializer_list<left_value_t> init)
         {
-            try
+            for (auto &x : init)
             {
-                for (auto &x : init)
-                {
-                    insert(x.first, x.second);
-                }
-            }
-            catch (...)
-            {
-                this->~bimap();
-                throw;
+                insert(x.first, x.second);
             }
         }
 

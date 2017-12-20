@@ -173,18 +173,6 @@ namespace
 
 constexpr size_t ITERATIONS = 10000;
 
-TEST(simple_map, copy_ctor)
-{
-    const std::string check_string("abacaba");
-    bimap<int32_t, std::string> bm;
-    bm.insert(1, check_string);
-    bimap<int32_t, std::string> bimap2(bm);
-    ASSERT_EQ(bimap2.find<Left>(1)->second, check_string);
-    bm.erase<Right>(check_string);
-    ASSERT_EQ(bm.find<Left>(1), bm.end<Left>());
-    ASSERT_EQ(bimap2.find<Left>(1)->second, check_string);
-}
-
 TEST(simple_map, insert)
 {
     bimap<double, std::string> bm;
